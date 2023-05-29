@@ -6,14 +6,13 @@ import (
 	"strconv"
 
 	"github.com/miekg/dns"
+
+	"github.com/vladimish/ddns/bridge/pkg/client"
 )
 
-var domainsToAddresses = map[string]string{
-	"google.com.":       "1.2.3.4",
-	"jameshfisher.com.": "104.198.14.52",
+type handler struct {
+	e *client.Ethereum
 }
-
-type handler struct{}
 
 func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	msg := dns.Msg{}
@@ -22,13 +21,14 @@ func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	case dns.TypeA:
 		msg.Authoritative = true
 		domain := msg.Question[0].Name
-		address, ok := domainsToAddresses[domain]
-		if ok {
-			msg.Answer = append(msg.Answer, &dns.A{
-				Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-				A:   net.ParseIP(address),
-			})
+		address, err := h.e.GetRecord(domain)
+		if err != nil {
+			panic(err)
 		}
+		msg.Answer = append(msg.Answer, &dns.A{
+			Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP(address),
+		})
 	}
 	err := w.WriteMsg(&msg)
 	if err != nil {
@@ -37,8 +37,18 @@ func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 func main() {
+	// TODO: move to config
+	e := client.NewEthereum("")
+	err := e.InitializeClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	srv := &dns.Server{Addr: ":" + strconv.Itoa(53), Net: "udp"}
-	srv.Handler = &handler{}
+	srv.Handler = &handler{
+		e: e,
+	}
+
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to set udp listener %s\n", err.Error())
 	}
